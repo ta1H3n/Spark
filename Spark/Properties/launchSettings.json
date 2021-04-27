@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "Spark": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    }
+  }
+}
