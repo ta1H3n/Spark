@@ -1,4 +1,5 @@
 ﻿using Discord;
+using Discord.Rest;
 using Discord.WebSocket;
 using System;
 using System.Collections.Generic;
@@ -93,30 +94,30 @@ namespace Spark
             }
         }
 
-        private Dictionary<ulong, DateTime> Rate = new Dictionary<ulong, DateTime>();
+        private Dictionary<ulong, (DateTime, Task<RestUserMessage>)> Rate = new Dictionary<ulong, (DateTime, Task<RestUserMessage>)>();
         private object RenameLock = new object();
-        private async Task Client_MessageReceived(SocketMessage msg)
+        private async Task Client_MessageReceived(SocketMessage arg)
         {
-            if (msg.Author.IsBot)
+            if (arg.Author.IsBot)
                 return;
-            if (!Config.RenameChannelIds.Contains(msg.Channel.Id))
+            if (!Config.RenameChannelIds.Contains(arg.Channel.Id))
                 return;
-            if (msg.MentionedUsers.Any(x => Client.CurrentUser.Id == x.Id))
+            if (arg.MentionedUsers.Any(x => Client.CurrentUser.Id == x.Id))
                 return;
 
             lock (RenameLock)
             {
-                if (Rate.TryGetValue(msg.Channel.Id, out var dateTime))
+                if (Rate.TryGetValue(arg.Channel.Id, out var dateTime))
                 {
-                    if (dateTime > DateTime.Now)
+                    if (dateTime.Item1 > DateTime.Now)
                     {
                         return;
                     }
                 }
 
-                if (msg.Channel is SocketGuildChannel)
+                if (arg.Channel is SocketGuildChannel)
                 {
-                    string name = Remove(msg.ToString(), "<", ">").Replace("<", "").Replace(">", "").Trim();
+                    string name = Remove(arg.ToString(), "<", ">").Replace("<", "").Replace(">", "").Trim();
                     if (name.ToString().Length > 0)
                     {
                         if (name.ToString().Length > 100)
@@ -124,14 +125,20 @@ namespace Spark
                             name = name.Substring(0, 99);
                         }
 
-                        var ch = msg.Channel as SocketGuildChannel;
-                        ch.ModifyAsync(x => x.Name = name);
+                        var ch = arg.Channel as SocketGuildChannel;
+                        string oldName = ch.Name;
+                        _ = ch.ModifyAsync(x => x.Name = name);
+                        var msg = arg.Channel.SendMessageAsync(embed: new EmbedBuilder().WithDescription($"`{oldName}` -> `{name}`").WithColor(Color.Gold).Build());
 
-                        if (Rate.ContainsKey(msg.Channel.Id))
+                        if (Rate.TryGetValue(arg.Channel.Id, out var item))
                         {
-                            Rate.Remove(msg.Channel.Id);
+                            try
+                            {
+                                _ = item.Item2.Result.DeleteAsync();
+                            } catch { }
+                            Rate.Remove(arg.Channel.Id);
                         }
-                        Rate.Add(msg.Channel.Id, DateTime.Now.AddMinutes(10));
+                        Rate.Add(arg.Channel.Id, (DateTime.Now.AddMinutes(10), msg));
                     }
                 }
             }
