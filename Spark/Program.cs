@@ -7,6 +7,8 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using ProfanityFilter;
+using System.Text;
 
 namespace Spark
 {
@@ -125,6 +127,8 @@ namespace Spark
                             name = name.Substring(0, 99);
                         }
 
+                        name = Profane(arg, name);
+
                         var ch = arg.Channel as SocketGuildChannel;
                         string oldName = ch.Name;
                         _ = ch.ModifyAsync(x => x.Name = name);
@@ -142,6 +146,21 @@ namespace Spark
                     }
                 }
             }
+        }
+
+        ProfanityFilter.ProfanityFilter filter = new ProfanityFilter.ProfanityFilter(Config.Profanities);
+        private string Profane(SocketMessage arg, string msg)
+        {
+            string flair = " just tried to be funny xd";
+            if (filter.ContainsProfanity(msg.ToLower()))
+            {
+                return arg.Author.Username + flair;
+            }
+            else if (msg.ToLower().EndsWith(flair))
+            {
+                return "You tried.";
+            }
+            return msg;
         }
 
         private async Task Client_Ready()

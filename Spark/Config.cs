@@ -14,6 +14,9 @@ namespace Spark
         [JsonProperty("renameChannelIds")]
         public static HashSet<ulong> RenameChannelIds { get; set; }
 
+        [JsonProperty("profanities")]
+        public static string[] Profanities { get; set; }
+
         [JsonProperty("logChannelId")]
         public static ulong LogChannelId { get; set; }
 
