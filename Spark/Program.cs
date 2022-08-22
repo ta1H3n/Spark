@@ -46,8 +46,10 @@ namespace Spark
             });
 
             Client.Ready += Client_Ready;
-            Client.MessageReceived += Client_MessageReceived;
+            Client.MessageReceived += MsgReveiced_RenameChannel;
+            Client.MessageReceived += MsgReceived_RenameUser;
             Client.MessageReceived += Client_ReceivedMessageFromBoss;
+            Client.Log += Client_Log;
 
             await Client.LoginAsync(TokenType.Bot, Config.Token);
             await Client.StartAsync();
@@ -62,6 +64,20 @@ namespace Spark
             await Client.LogoutAsync();
         }
 
+        private Task Client_Log(LogMessage arg)
+        {
+            if (arg.Severity == LogSeverity.Warning || arg.Severity == LogSeverity.Error || arg.Severity == LogSeverity.Critical)
+            {
+                Console.WriteLine(arg.Message);
+            }
+            if (arg.Exception != null)
+            {
+                Console.WriteLine(arg.Exception.Message);
+                Console.WriteLine(arg.Exception);
+            }
+            return Task.CompletedTask;
+        }
+
         private async Task Client_ReceivedMessageFromBoss(SocketMessage arg)
         {
             if (arg.Author.Id != Config.OwnerId)
@@ -73,6 +89,13 @@ namespace Spark
             string msg = Remove(arg.ToString(), "<", ">").Replace("<", "").Replace(">", "").Trim();
 
             if (msg.Equals("Die"))
+            {
+                await arg.Channel.SendMessageAsync($"Finally, sweet release...");
+                cts.Cancel();
+                return;
+            }
+
+            else if (msg.Equals("Hi"))
             {
                 await arg.Channel.SendMessageAsync($"Finally, sweet release...");
                 cts.Cancel();
@@ -94,11 +117,26 @@ namespace Spark
                     await arg.Channel.SendMessageAsync($"On it, boss uwu");
                 }
             }
+            else if (msg.Equals("Awooo"))
+            {
+                if (Config.RenameUserChannelIds.Contains(arg.Channel.Id))
+                {
+                    Config.RenameUserChannelIds.Remove(arg.Channel.Id);
+                    Config.Save();
+                    await arg.Channel.SendMessageAsync($"Seeyanara uwu");
+                }
+                else
+                {
+                    Config.RenameUserChannelIds.Add(arg.Channel.Id);
+                    Config.Save();
+                    await arg.Channel.SendMessageAsync($"Not again... please");
+                }
+            }
         }
 
         private Dictionary<ulong, (DateTime, Task<RestUserMessage>)> Rate = new Dictionary<ulong, (DateTime, Task<RestUserMessage>)>();
         private object RenameLock = new object();
-        private async Task Client_MessageReceived(SocketMessage arg)
+        private async Task MsgReveiced_RenameChannel(SocketMessage arg)
         {
             if (arg.Author.IsBot)
                 return;
@@ -130,7 +168,7 @@ namespace Spark
                         name = Profane(arg, name);
 
                         var ch = arg.Channel as SocketGuildChannel;
-                        string oldName = ch.Name;
+                        string oldName = ch.Name.ToString();
                         _ = ch.ModifyAsync(x => x.Name = name);
                         var msg = arg.Channel.SendMessageAsync(embed: new EmbedBuilder().WithDescription($"`{oldName}` -> `{name}`").WithColor(Color.Gold).Build());
 
@@ -148,6 +186,70 @@ namespace Spark
             }
         }
 
+
+        private Dictionary<ulong, (DateTime, Task<RestUserMessage>)> UserRate = new Dictionary<ulong, (DateTime, Task<RestUserMessage>)>();
+        private object RenameUserLock = new object();
+        private async Task MsgReceived_RenameUser(SocketMessage arg)
+        {
+            if (arg.Author.IsBot)
+                return;
+            if (!Config.RenameUserChannelIds.Contains(arg.Channel.Id))
+                return;
+            if (arg.MentionedUsers.Any(x => Client.CurrentUser.Id == x.Id))
+                return;
+
+            lock (RenameUserLock)
+            {
+                if (UserRate.TryGetValue(arg.Channel.Id, out var dateTime))
+                {
+                    if (dateTime.Item1 > DateTime.Now)
+                    {
+                        return;
+                    }
+                }
+
+                if (arg.Channel is SocketGuildChannel)
+                {
+                    string name = Remove(arg.ToString(), "<", ">").Replace("<", "").Replace(">", "").Trim();
+                    if (name.ToString().Length > 0)
+                    {
+                        if (name.ToString().Length > 100)
+                        {
+                            name = name.Substring(0, 99);
+                        }
+
+                        name = Profane(arg, name);
+
+                        var user = arg.Author as SocketGuildUser;
+                        string oldName = user.Nickname?.ToString() ?? user.Username.ToString();
+                        _ = user.ModifyAsync(x => x.Nickname = name);
+
+                        var eb = new EmbedBuilder()
+                            .WithAuthor(oldName, user.GetAvatarUrl())
+                            .WithDescription($"- is now `{name}` =w=")
+                            .WithColor(Color.Gold);
+
+                        var msg = arg.Channel.SendMessageAsync(embed: eb.Build());
+
+                        if (UserRate.TryGetValue(arg.Channel.Id, out var item))
+                        {
+                            try
+                            {
+                                _ = item.Item2.Result.DeleteAsync();
+                            }
+                            catch { }
+                            UserRate.Remove(arg.Channel.Id);
+                        }
+                        UserRate.Add(arg.Channel.Id, (DateTime.Now.AddMinutes(10), msg));
+                    }
+                }
+            }
+        }
+
+
+
+
+
         ProfanityFilter.ProfanityFilter filter = new ProfanityFilter.ProfanityFilter(Config.Profanities);
         private string Profane(SocketMessage arg, string msg)
         {
@@ -162,7 +264,6 @@ namespace Spark
             }
             return msg;
         }
-
         private async Task Client_Ready()
         {
             var ch = Client.GetChannel(Config.LogChannelId) as SocketTextChannel;
@@ -174,7 +275,6 @@ namespace Spark
 
             await ch.SendMessageAsync(msg);
         }
-
         private string Remove(string original, string firstTag, string secondTag)
         {
             string pattern = firstTag + "(.*?)" + secondTag;
